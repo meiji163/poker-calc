@@ -1,27 +1,8 @@
 (ns poker-calc.core
-  (:require [clojure.math.combinatorics :as combo])
+  (:require [clojure.math.combinatorics :as combo]
+            [clojure.core.async :as a]
+            [poker-calc.util :refer [select-val in? first-key max-with concatv]])
   (:gen-class))
-
-;;;;;;;; util
-(defn select-val [m val]
-  (select-keys m (for [[k v] m :when (= v val)] k)))
-
-(defn in?
-  [coll elm]
-  (some #(= elm %) coll))
-
-(def first-key (comp first keys))
-
-(defn max-with [cmp-fn coll]
-  "max by comparison function"
-  (letfn [(f [v1 v2]
-            (let [cmp (cmp-fn v1 v2)]
-              (cond (= 0 cmp) v1
-                    (< 0 cmp) v1
-                    (> 0 cmp) v2)))]
-    (reduce f coll)))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 (def suits [:spade :club :diamond :heart])
 
@@ -43,7 +24,7 @@
   "`ranks` must be sorted desc"
   (cond
     ;; wheel
-    (= [11 5 4 3 2] ranks)
+    (= [14 5 4 3 2] ranks)
     1
 
     (= [4 3 2 1 0] (map #(- % 2) ranks))
@@ -153,10 +134,41 @@
       type-comp
       (compare-tie h1 h2))))
 
-;; 7 choose 5 = 21
-(defn best-hand [board]
-  (let [hands (map classify-hand (combo/combinations board 5))]
-    (max-with compare-hands hands)))
+(defn best-hand
+  ([hand-board]
+   (let [hands ;; 7 choose 5 = 21 possible hands
+         (map classify-hand (combo/combinations hand-board 5))]
+     (max-with compare-hands hands)))
+  ([hand board]
+   (best-hand (concatv hand board))))
+
+(defn play-sim [board & hands]
+   (let [hand-board (concatv (concat hands) board)
+         deck (filter #(not (in? hand-board %))
+                      (shuffle full-deck))
+         ;; draw rest of board
+         n-draws (- 5 (count board))
+         draws (into [] (take n-draws deck))
+         sim-board (concatv board draws)
+         results (map #(best-hand % sim-board) hands)]
+     {:draws draws
+      :result (if (= 1 (count results))
+                (first results)
+                results)}))
+
+(defn run-n [n fn & args]
+  (for [_ (range n)]
+    (apply fn args)))
+
+()
+
+(let [runs (run-n 10000
+                  play-sim
+                  [[4 :diamond] [4 :spade] [14 :club]]
+                  [[10 :diamond] [9 :diamond]])
+      types (map #(get-in % [:result :type]) runs)]
+  (frequencies types))
+
 
 (defn -main
   "I don't do a whole lot ... yet."
